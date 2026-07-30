@@ -5,9 +5,23 @@ over whatever app you're in, so you don't sit staring at a blocked terminal. mac
 
 Supported agents: **Claude Code, Codex CLI, Gemini CLI, Cursor, Aider.**
 
-> **Status:** macOS is tested end-to-end (Claude Code, live). The Windows notifier + installer +
-> approver logic is validated on PowerShell 7.4; the WinRT toast *display* and the Approve dialog
-> itself still need testing on real Windows hardware — reports welcome.
+### What's actually tested
+
+| Thing | How it was verified |
+|---|---|
+| macOS + Claude Code | ✅ live end-to-end (real `Notification` hook → banner) |
+| macOS notifications | ✅ fired reliably via `osascript` (attributed to a pre-authorized app) |
+| Codex CLI `v0.146` | ✅ real binary accepts our `config.toml` — `codex --strict-config doctor`, no complaint |
+| Gemini CLI `v0.53` | ✅ real binary loads our `settings.json` hooks with no error |
+| Aider | ⚠️ config is valid YAML and matches Aider's docs exactly; binary not run here (won't build on Python 3.14) |
+| Cursor | ⚠️ `hooks.json` schema validated against Cursor's docs; GUI app, not executed |
+| Approve/Decline (macOS) | ✅ decision logic 20/20; a dialog timeout **defers**, never auto-approves |
+| Windows notifier + installer + approver | ⚠️ logic validated on PowerShell 7.4; the toast/dialog *display* needs real Windows hardware |
+| Installer | ✅ cold start, idempotent (double-run), preserves existing config, fails cleanly without `jq` |
+
+⚠️ = not exercised against the live software/OS. Reports from those environments are welcome.
+
+**Prerequisite (macOS/Linux install):** `jq` — `brew install jq` (macOS) or `apt install jq` (Debian/Ubuntu).
 
 ## Install
 

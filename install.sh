@@ -10,6 +10,12 @@ chmod +x "$notify" "$approve"
 have() { command -v "$1" >/dev/null 2>&1; }
 declare -a done_msgs=()
 
+if ! have jq; then
+  echo "agentnotify: this installer needs 'jq' to edit JSON configs safely." >&2
+  echo "  macOS:  brew install jq        Debian/Ubuntu:  sudo apt install jq" >&2
+  exit 1
+fi
+
 WITH_APPROVE=0
 for a in "$@"; do [[ "$a" == "--approve" ]] && WITH_APPROVE=1; done
 
@@ -33,6 +39,7 @@ wire_approve() {
 # --- Claude Code & Gemini CLI: JSON settings, hooks.Notification, stdin JSON ---
 merge_json_hook() { # <settings-file> <agent-label>
   local settings="$1" label="$2"
+  mkdir -p "$(dirname "$settings")"
   [[ -f "$settings" ]] || echo '{}' > "$settings"
   local bak="$settings.bak.$(date +%s)"; cp "$settings" "$bak"; chmod 600 "$bak"
   local tmp; tmp="$(mktemp)"
@@ -97,3 +104,4 @@ merge_json_hook "$HOME/.claude/settings.json" "Claude Code"      # Claude is why
 printf '\n'; for m in "${done_msgs[@]}"; do echo "  $m"; done; printf '\n'
 echo "  Test:  $notify --test"
 [[ $WITH_APPROVE -eq 0 ]] && echo "  Approve/Decline from a dialog (Claude Code): re-run with  ./install.sh --approve"
+exit 0
