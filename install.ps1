@@ -1,16 +1,41 @@
 <#
   Wire agentnotify into every supported agent found on this machine (Windows).
   Mirror of install.sh. Safe, idempotent, backs up before touching any config.
-  Run:  powershell -ExecutionPolicy Bypass -File install.ps1
+  Run:  powershell -ExecutionPolicy Bypass -File install.ps1 [-Approve]
+  -Approve also wires the Claude Code Approve/Decline dialog (PreToolUse). Off by default.
 #>
+param([switch]$Approve)
 $ErrorActionPreference = "Stop"
-$dir    = Split-Path -Parent $MyInvocation.MyCommand.Path
-$notify = Join-Path $dir "notify.ps1"
-$home_  = $env:USERPROFILE
-$log    = @()
+$dir           = Split-Path -Parent $MyInvocation.MyCommand.Path
+$notify        = Join-Path $dir "notify.ps1"
+$approveScript = Join-Path $dir "approve.ps1"   # not $approve: case-insensitive clash with -Approve
+$home_         = $env:USERPROFILE
+$log     = @()
 
 function Have($cmd) { $null -ne (Get-Command $cmd -ErrorAction SilentlyContinue) }
 function RunCmd($label) { "powershell -ExecutionPolicy Bypass -File `"$notify`" -Agent `"$label`"" }
+
+# Opt-in: Claude Code Approve/Decline dialog via a PreToolUse hook (replaces the
+# in-terminal prompt for the matched tools). Only wired with -Approve.
+function Wire-Approve {
+  $settings = Join-Path $home_ ".claude\settings.json"
+  if (-not (Test-Path $settings)) { "{}" | Set-Content $settings }
+  Copy-Item $settings "$settings.bak.$(Get-Date -UFormat %s)" -Force
+  $cmd = "powershell -ExecutionPolicy Bypass -File `"$approveScript`""
+  $o = Get-Content $settings -Raw | ConvertFrom-Json -AsHashtable
+  if (-not $o) { $o = @{} }
+  if (($o.hooks -isnot [hashtable])) { $o.hooks = @{} }
+  $existing = @()
+  if ($o.hooks.ContainsKey('PreToolUse')) {
+    $existing = @($o.hooks.PreToolUse) | Where-Object {
+      $c = @(); if ($_.hooks) { $c = @($_.hooks | ForEach-Object { $_.command }) }
+      ($c -join ' ') -notlike "*$approveScript*"
+    }
+  }
+  $o.hooks.PreToolUse = @($existing) + @(@{ matcher = 'Bash|Edit|Write|MultiEdit|NotebookEdit'; hooks = @(@{ type = 'command'; command = $cmd }) })
+  ($o | ConvertTo-Json -Depth 20) | Set-Content $settings
+  $script:log += "OK  Approve dialog  ->  Claude Code PreToolUse"
+}
 
 # --- Claude Code & Gemini CLI: JSON settings, hooks.Notification, stdin JSON ---
 function Merge-JsonHook($settings, $label) {
@@ -86,6 +111,8 @@ if ((Have "gemini")      -or (Test-Path (Join-Path $home_ ".gemini")))  { Merge-
 if ((Have "cursor")      -or (Test-Path (Join-Path $home_ ".cursor")))  { Wire-Cursor } else { $log += "--  Cursor skipped" }
 if ((Have "codex")       -or (Test-Path (Join-Path $home_ ".codex")))   { Wire-Codex }  else { $log += "--  Codex skipped" }
 if ((Have "aider")       -or (Test-Path (Join-Path $home_ ".aider.conf.yml"))) { Wire-Aider } else { $log += "--  Aider skipped" }
+if ($Approve) { Wire-Approve }
 
 "`n" + ($log -join "`n") + "`n"
 "Test:  powershell -ExecutionPolicy Bypass -File `"$notify`" -Test"
+if (-not $Approve) { "Approve/Decline dialog (Claude Code): re-run with  -Approve" }

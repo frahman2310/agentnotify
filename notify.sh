@@ -36,30 +36,10 @@ msg="${msg//$'\n'/ }"; msg="${msg:0:200}"          # one line, keep it short
 cwd="$(get '.cwd')"; proj="${cwd:+ · $(basename "$cwd")}"
 title="${agent}${proj}"
 
-# TERM_PROGRAM is inherited from the terminal the agent runs in → focus it on click.
-bundle_for_term() {
-  case "${TERM_PROGRAM:-}" in
-    Apple_Terminal) echo com.apple.Terminal ;;
-    iTerm.app)      echo com.googlecode.iterm2 ;;
-    vscode)         echo com.microsoft.VSCode ;;
-    Cursor)         echo com.todesktop.230313mzl4w4u92 ;;
-    WarpTerminal)   echo dev.warp.Warp-Stable ;;
-    ghostty)        echo com.mitchellh.ghostty ;;
-    Hyper)          echo co.zeit.hyper ;;
-    WezTerm)        echo com.github.wez.wezterm ;;
-    *)              echo "" ;;
-  esac
-}
-
-# Post silently and never fail the calling hook (some agents read our stdout/exit
-# code as a permission decision — we must stay quiet and exit 0).
-if command -v terminal-notifier >/dev/null 2>&1; then
-  args=(-title "$title" -message "$msg" -sound default -group "agentnotify-$agent")
-  bundle="$(bundle_for_term)"; [[ -n "$bundle" ]] && args+=(-activate "$bundle")
-  terminal-notifier "${args[@]}" >/dev/null 2>&1 || true
-else
-  esc_msg=${msg//\\/\\\\};   esc_msg=${esc_msg//\"/\\\"}
-  esc_title=${title//\\/\\\\}; esc_title=${esc_title//\"/\\\"}
-  /usr/bin/osascript -e "display notification \"$esc_msg\" with title \"$esc_title\" sound name \"Ping\"" >/dev/null 2>&1 || true
-fi
+# osascript posts as a pre-authorized system app, so it displays reliably on modern
+# macOS (terminal-notifier is silently dropped on Tahoe unless authorized). Stay quiet
+# and exit 0 — some agents read our stdout/exit code as a permission decision.
+em=${msg//\\/\\\\};   em=${em//\"/\\\"}
+et=${title//\\/\\\\}; et=${et//\"/\\\"}
+/usr/bin/osascript -e "display notification \"$em\" with title \"$et\" sound name \"Ping\"" >/dev/null 2>&1 || true
 exit 0

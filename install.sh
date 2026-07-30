@@ -5,9 +5,30 @@ set -euo pipefail
 
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 notify="$dir/notify.sh"
-chmod +x "$notify"
+approve="$dir/approve.sh"
+chmod +x "$notify" "$approve"
 have() { command -v "$1" >/dev/null 2>&1; }
 declare -a done_msgs=()
+
+WITH_APPROVE=0
+for a in "$@"; do [[ "$a" == "--approve" ]] && WITH_APPROVE=1; done
+
+# Opt-in: Approve/Decline dialog for Claude Code via a PreToolUse hook. Fires for the
+# matched tools and REPLACES Claude's in-terminal permission prompt with a dialog you
+# can answer from any app. Off by default (it changes how every matched tool is gated).
+wire_approve() {
+  local settings="$HOME/.claude/settings.json"; [[ -f "$settings" ]] || echo '{}' > "$settings"
+  cp "$settings" "$settings.bak.$(date +%s)"; chmod 600 "$settings.bak."* 2>/dev/null || true
+  local tmp; tmp="$(mktemp)"
+  jq --arg cmd "$approve" --arg m "Bash|Edit|Write|MultiEdit|NotebookEdit" '
+    .hooks.PreToolUse =
+      (((.hooks // {}).PreToolUse // [])
+       | map(select((.hooks // []) | map(.command) | map(contains($cmd)) | any | not))
+       + [{"matcher":$m,"hooks":[{"type":"command","command":$cmd}]}])
+  ' "$settings" > "$tmp" || { echo "jq failed for approve" >&2; return 1; }
+  mv "$tmp" "$settings"; chmod 600 "$settings"
+  done_msgs+=("✅ Approve dialog  →  Claude Code PreToolUse (Bash|Edit|Write|MultiEdit|NotebookEdit)")
+}
 
 # --- Claude Code & Gemini CLI: JSON settings, hooks.Notification, stdin JSON ---
 merge_json_hook() { # <settings-file> <agent-label>
@@ -71,7 +92,8 @@ merge_json_hook "$HOME/.claude/settings.json" "Claude Code"      # Claude is why
 { have cursor || have cursor-agent || [[ -d $HOME/.cursor ]]; } && wire_cursor || done_msgs+=("—  Cursor not found, skipped")
 { have codex || [[ -d $HOME/.codex ]]; } && wire_codex || done_msgs+=("—  Codex not found, skipped")
 { have aider || [[ -f $HOME/.aider.conf.yml ]]; } && wire_aider || done_msgs+=("—  Aider not found, skipped")
+[[ $WITH_APPROVE -eq 1 ]] && wire_approve
 
 printf '\n'; for m in "${done_msgs[@]}"; do echo "  $m"; done; printf '\n'
-have terminal-notifier || echo "  ℹ️  For click-to-focus: brew install terminal-notifier"
 echo "  Test:  $notify --test"
+[[ $WITH_APPROVE -eq 0 ]] && echo "  Approve/Decline from a dialog (Claude Code): re-run with  ./install.sh --approve"

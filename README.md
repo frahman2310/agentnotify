@@ -5,9 +5,9 @@ over whatever app you're in, so you don't sit staring at a blocked terminal. mac
 
 Supported agents: **Claude Code, Codex CLI, Gemini CLI, Cursor, Aider.**
 
-> **Status:** macOS is tested end-to-end (Claude Code, live). The Windows notifier + installer
-> logic is validated on PowerShell 7.4; the WinRT toast *display* itself still needs testing on real
-> Windows hardware — reports welcome.
+> **Status:** macOS is tested end-to-end (Claude Code, live). The Windows notifier + installer +
+> approver logic is validated on PowerShell 7.4; the WinRT toast *display* and the Approve dialog
+> itself still need testing on real Windows hardware — reports welcome.
 
 ## Install
 
@@ -24,12 +24,26 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 The installer wires **every agent it finds installed** (and skips the rest — re-run after installing
-more). It backs up each config first and is idempotent. For macOS **click-to-focus** (clicking the
-notification jumps you back to the terminal):
+more). It backs up each config first and is idempotent.
+
+Notifications post via `osascript` on macOS — attributed to a pre-authorized system app, so they
+display reliably on macOS Tahoe (`terminal-notifier` is silently dropped there unless authorized).
+
+## Approve / Decline from the popup (Claude Code, opt-in)
 
 ```bash
-brew install terminal-notifier
+./install.sh --approve                                        # macOS/Linux
+powershell -ExecutionPolicy Bypass -File install.ps1 -Approve # Windows
 ```
+
+Adds a `PreToolUse` hook so that before Claude Code runs a matched tool
+(`Bash|Edit|Write|MultiEdit|NotebookEdit`) an **Approve / Decline** dialog pops over whatever app
+you're in. Approve → the tool runs; Decline → it's blocked; **Open Terminal / timeout / Esc** → falls
+through to Claude's normal in-terminal prompt (a timeout **never** auto-approves). This **replaces**
+Claude's in-terminal permission prompt for those tools, so it's off by default — enable it deliberately.
+
+Only Claude Code supports this: its `PreToolUse` hook can return a decision. The other agents' notify
+hooks are fire-and-forget, so they can notify but not approve inline.
 
 ## Test
 
