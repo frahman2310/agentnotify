@@ -1,7 +1,6 @@
 # agentnotify
 
-Native desktop notification when **any AI coding agent needs you** — approval or your turn — popped
-over whatever app you're in, so you don't sit staring at a blocked terminal. macOS + Windows.
+Native desktop notification when **any AI coding agent needs you** approval or your turn — popped over whatever app you're in, so you don't sit wasting time at a blocked terminal. macOS + Windows.
 
 Supported agents: **Claude Code, Codex CLI, Gemini CLI, Cursor, Aider.**
 
