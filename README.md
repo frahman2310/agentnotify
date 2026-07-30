@@ -1,89 +1,81 @@
 # agentnotify
 
-Native desktop notification when **any AI coding agent needs you** approval or your turn popped over whatever app you're in, so you don't sit wasting time at a blocked terminal. macOS + Windows.
+Two things for AI coding agents, so you stop wasting time at a blocked terminal:
 
-Supported agents: **Claude Code, Codex CLI, Gemini CLI, Cursor, Aider.**
+1. **Notifications** — a native popup when an agent needs you (approval or "your turn"), over whatever
+   app is focused.
+2. **Approve / Decline in the popup** — for agents that can process a decision, a floating
+   **Approve/Decline** dialog pops over your current app and *actually allows or blocks* the command.
+   No rerouting to the terminal.
 
-### What's actually tested
-
-| Thing | How it was verified |
-|---|---|
-| macOS + Claude Code | ✅ live end-to-end (real `Notification` hook → banner) |
-| macOS notifications | ✅ fired reliably via `osascript` (attributed to a pre-authorized app) |
-| Codex CLI `v0.146` | ✅ real binary accepts our `config.toml` — `codex --strict-config doctor`, no complaint |
-| Gemini CLI `v0.53` | ✅ real binary loads our `settings.json` hooks with no error |
-| Aider | ⚠️ config is valid YAML and matches Aider's docs exactly; binary not run here (won't build on Python 3.14) |
-| Cursor | ⚠️ `hooks.json` schema validated against Cursor's docs; GUI app, not executed |
-| Approve/Decline (macOS) | ✅ decision logic 20/20; a dialog timeout **defers**, never auto-approves |
-| Windows notifier + installer + approver | ⚠️ logic validated on PowerShell 7.4; the toast/dialog *display* needs real Windows hardware |
-| Installer | ✅ cold start, idempotent (double-run), preserves existing config, fails cleanly without `jq` |
-
-⚠️ = not exercised against the live software/OS. Reports from those environments are welcome.
+macOS + Windows. Supported agents: **Claude Code, Codex CLI, Gemini CLI, Cursor, Aider.**
 
 **Prerequisite (macOS/Linux install):** `jq` — `brew install jq` (macOS) or `apt install jq` (Debian/Ubuntu).
 
 ## Install
 
-macOS / Linux:
-
 ```bash
-./install.sh
+./install.sh                                             # macOS/Linux
+powershell -ExecutionPolicy Bypass -File install.ps1     # Windows
 ```
 
-Windows (PowerShell):
+Wires **every agent it finds installed** (skips the rest — re-run after installing more), backs up each
+config first, and is idempotent. The Approve/Decline dialog is **on by default**; add `--no-approve`
+(`-NoApprove` on Windows) for notifications only.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1
-```
+## How it works
 
-The installer wires **every agent it finds installed** (and skips the rest — re-run after installing
-more). It backs up each config first and is idempotent.
+Every agent can run a command at a lifecycle event. The installer points each event at one of two
+scripts. **Notifications** ([`notify.sh`](notify.sh)/[`notify.ps1`](notify.ps1)) are fire-and-forget —
+on macOS they post via `osascript`, attributed to a pre-authorized system app so they display reliably
+on Tahoe (`terminal-notifier`/`alerter` banners get silently dropped there). **Approvals**
+([`approve.sh`](approve.sh)/[`approve.ps1`](approve.ps1)) pop a floating `display dialog` with
+Approve/Decline and return the decision to the agent. No daemon.
 
-Notifications post via `osascript` on macOS — attributed to a pre-authorized system app, so they
-display reliably on macOS Tahoe (`terminal-notifier` is silently dropped there unless authorized).
+| Agent | Notify event | **Approve** event → what it does |
+|---|---|---|
+| Claude Code | `Notification` (idle/permission) | `PreToolUse` (Bash/Edit/Write/…) → `permissionDecision: allow\|deny` |
+| Cursor | `stop` | `beforeShellExecution`, `beforeMCPExecution` → `{"permission":"allow\|deny"}` |
+| Gemini CLI | `Notification` | `BeforeTool` (shell/write/replace) → deny via `{"decision":"deny"}`, allow = default |
+| Codex CLI | `config.toml` `notify` (turn complete) | `hooks.json` `PermissionRequest` → `decision.behavior: allow\|deny` |
+| Aider | `notifications-command` | — (no decision channel; notify only) |
 
-## Approve / Decline from the popup (Claude Code, opt-in)
+Approve → the command runs. Decline → it's blocked. **Timeout (120s) / Esc → defer** to the agent's own
+prompt — a timeout **never** auto-approves. (Gemini has no neutral channel, so its timeout denies.)
 
-```bash
-./install.sh --approve                                        # macOS/Linux
-powershell -ExecutionPolicy Bypass -File install.ps1 -Approve # Windows
-```
-
-Adds a `PreToolUse` hook so that before Claude Code runs a matched tool
-(`Bash|Edit|Write|MultiEdit|NotebookEdit`) an **Approve / Decline** dialog pops over whatever app
-you're in. Approve → the tool runs; Decline → it's blocked; **Open Terminal / timeout / Esc** → falls
-through to Claude's normal in-terminal prompt (a timeout **never** auto-approves). This **replaces**
-Claude's in-terminal permission prompt for those tools, so it's off by default — enable it deliberately.
-
-Only Claude Code supports this: its `PreToolUse` hook can return a decision. The other agents' notify
-hooks are fire-and-forget, so they can notify but not approve inline.
+Scope: approvals fire for **mutating tools** (shell/edit/write); read-only tools don't prompt. On
+by default because it replaces the in-terminal permission prompt — that's the point. `--no-approve`
+opts out.
 
 ## Test
 
 ```bash
-./notify.sh --test                                    # macOS/Linux
+./notify.sh --test                                          # notification
 powershell -ExecutionPolicy Bypass -File notify.ps1 -Test   # Windows
+
+# approver decision logic, no real dialog:
+echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | AGENTNOTIFY_MOCK=1 AGENTNOTIFY_MOCK_CHOICE=Approve ./approve.sh --agent claude
 ```
 
-## How it works
+## What's actually tested
 
-Every agent can run a command when it's blocked on you. The installer points each one at the notifier
-([`notify.sh`](notify.sh) / [`notify.ps1`](notify.ps1)), which reads the event and posts a native
-notification. No daemon, no background process.
+| Thing | How it was verified |
+|---|---|
+| macOS + Claude Code notifications | ✅ live end-to-end (real `Notification` hook → banner) |
+| Approver decision schemas (all 4 agents × allow/deny/timeout) | ✅ 12/12 on macOS `bash` and Windows `pwsh`; timeout defers, never auto-approves |
+| Codex `v0.146` | ✅ real binary accepts our `config.toml` + `hooks.json` (`--strict-config doctor`); Codex asks to **trust** the hook on first run |
+| Gemini `v0.53` | ✅ real binary loads our `settings.json` `Notification` + `BeforeTool` hooks, no error |
+| Installer | ✅ cold start, idempotent, preserves existing config, `--no-approve`, fails cleanly without `jq` |
+| Approval **fires end-to-end** for Codex/Gemini/Cursor | ⚠️ config accepted + doc-verified, but not run in a live authenticated session |
+| Cursor | ⚠️ `hooks.json` schema validated vs Cursor's docs; GUI app, not executed |
+| Aider | ⚠️ config valid YAML, matches docs; binary won't build on Python 3.14 here |
+| Windows dialog/toast **display** | ⚠️ all logic passes on PowerShell 7.4; the WinRT toast + MessageBox rendering need real Windows |
 
-| Agent | Config it wires | Event | Payload |
-|---|---|---|---|
-| Claude Code | `~/.claude/settings.json` → `hooks.Notification` | permission / idle | stdin JSON |
-| Gemini CLI | `~/.gemini/settings.json` → `hooks.Notification` | tool permission | stdin JSON |
-| Cursor | `~/.cursor/hooks.json` → `beforeShellExecution`, `beforeMCPExecution`, `stop` | about to run a command / your turn¹ | stdin JSON |
-| Codex CLI | `~/.codex/config.toml` → `notify` | turn complete | JSON arg |
-| Aider | `~/.aider.conf.yml` → `notifications-command` | waiting for input | none |
+⚠️ = not exercised against the live software/OS. Reports welcome.
 
-¹ Cursor has no hook that fires *only* when it's blocked on command approval yet
-([open request](https://forum.cursor.com/t/fire-a-hook-when-agent-waits-for-command-tool-approval/166947)).
-`beforeShellExecution` / `beforeMCPExecution` fire the moment Cursor is about to run a command — i.e.
-when it pauses to ask you (default settings). If you run Cursor with command auto-run enabled, these
-fire per command without a real stall, so you'll get more notifications; `stop` alone is quieter.
+Note: informational notifications (Codex "turn complete", Aider "waiting", Claude idle) are buttonless
+banners; clicking one is an `osascript` no-op that opens Finder — cosmetic and unavoidable for banners.
+The **approval** interaction is the dialog, which never reroutes.
 
 Uninstall: restore a `*.bak.*` file next to any config, or delete the entry the installer added.
 

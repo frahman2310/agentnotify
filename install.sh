@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Wire agentnotify into every supported agent found on this machine (macOS/Linux).
-# Safe, idempotent, backs up before touching any config.
+# Notifications (fire-and-forget) + an inline Approve/Decline dialog for agents that can
+# process a decision. Safe, idempotent, backs up before touching any config.
+#   --no-approve   notifications only (skip the Approve/Decline dialog wiring)
 set -euo pipefail
 
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,31 +18,14 @@ if ! have jq; then
   exit 1
 fi
 
-WITH_APPROVE=0
-for a in "$@"; do [[ "$a" == "--approve" ]] && WITH_APPROVE=1; done
+WITH_APPROVE=1
+for a in "$@"; do [[ "$a" == "--no-approve" ]] && WITH_APPROVE=0; done
 
-# Opt-in: Approve/Decline dialog for Claude Code via a PreToolUse hook. Fires for the
-# matched tools and REPLACES Claude's in-terminal permission prompt with a dialog you
-# can answer from any app. Off by default (it changes how every matched tool is gated).
-wire_approve() {
-  local settings="$HOME/.claude/settings.json"; [[ -f "$settings" ]] || echo '{}' > "$settings"
-  cp "$settings" "$settings.bak.$(date +%s)"; chmod 600 "$settings.bak."* 2>/dev/null || true
-  local tmp; tmp="$(mktemp)"
-  jq --arg cmd "$approve" --arg m "Bash|Edit|Write|MultiEdit|NotebookEdit" '
-    .hooks.PreToolUse =
-      (((.hooks // {}).PreToolUse // [])
-       | map(select((.hooks // []) | map(.command) | map(contains($cmd)) | any | not))
-       + [{"matcher":$m,"hooks":[{"type":"command","command":$cmd}]}])
-  ' "$settings" > "$tmp" || { echo "jq failed for approve" >&2; return 1; }
-  mv "$tmp" "$settings"; chmod 600 "$settings"
-  done_msgs+=("✅ Approve dialog  →  Claude Code PreToolUse (Bash|Edit|Write|MultiEdit|NotebookEdit)")
-}
-
-# --- Claude Code & Gemini CLI: JSON settings, hooks.Notification, stdin JSON ---
+# ---------- notification hooks (fire-and-forget "your turn / done") ----------
+# Claude Code & Gemini: JSON settings, hooks.Notification, stdin JSON.
 merge_json_hook() { # <settings-file> <agent-label>
   local settings="$1" label="$2"
-  mkdir -p "$(dirname "$settings")"
-  [[ -f "$settings" ]] || echo '{}' > "$settings"
+  mkdir -p "$(dirname "$settings")"; [[ -f "$settings" ]] || echo '{}' > "$settings"
   local bak="$settings.bak.$(date +%s)"; cp "$settings" "$bak"; chmod 600 "$bak"
   local tmp; tmp="$(mktemp)"
   jq --arg cmd "$notify --agent \"$label\"" --arg p "$notify" '
@@ -49,40 +34,22 @@ merge_json_hook() { # <settings-file> <agent-label>
        | map(select((.hooks // []) | map(.command) | map(contains($p)) | any | not))
        + [{"hooks":[{"type":"command","command":$cmd}]}])
   ' "$settings" > "$tmp" && mv "$tmp" "$settings"; chmod 600 "$settings"
-  done_msgs+=("✅ $label  →  $settings  (backup: $bak)")
+  done_msgs+=("🔔 $label notify  →  $settings")
 }
 
-# --- Cursor: ~/.cursor/hooks.json — approval-time (before*Execution) + stop ---
-wire_cursor() {
-  local cfg="$HOME/.cursor/hooks.json"; mkdir -p "$HOME/.cursor"
-  [[ -f "$cfg" ]] || echo '{"version":1,"hooks":{}}' > "$cfg"
-  cp "$cfg" "$cfg.bak.$(date +%s)"
-  local tmp; tmp="$(mktemp)"
-  # beforeShellExecution / beforeMCPExecution fire the moment Cursor is about to run a
-  # command — i.e. when it pauses for your approval (default settings). stop = your turn.
-  jq --arg cmd "$notify --agent Cursor" --arg p "$notify" '
-    .version = (.version // 1) | .hooks = (.hooks // {})
-    | reduce ("beforeShellExecution","beforeMCPExecution","stop") as $e (.;
-        .hooks[$e] = (((.hooks[$e]) // [])
-          | map(select((.command // "") | contains($p) | not)) + [{"command":$cmd}]))
-  ' "$cfg" > "$tmp" || { echo "jq failed for cursor" >&2; return 1; }
-  mv "$tmp" "$cfg"
-  done_msgs+=("✅ Cursor  →  $cfg  (beforeShellExecution, beforeMCPExecution, stop)")
-}
-
-# --- Codex CLI: ~/.codex/config.toml, top-level notify, JSON as trailing arg ---
-wire_codex() {
+# Codex: config.toml top-level notify (turn-complete), JSON as trailing arg.
+wire_codex_notify() {
   local cfg="$HOME/.codex/config.toml"; mkdir -p "$HOME/.codex"; [[ -f "$cfg" ]] || : > "$cfg"
   if grep -qE '^[[:space:]]*notify[[:space:]]*=' "$cfg"; then
-    grep -qF "$notify" "$cfg" && { done_msgs+=("✅ Codex  →  already wired"); return; }
-    done_msgs+=("⚠️  Codex  →  existing 'notify' in $cfg left untouched (edit manually)"); return
+    grep -qF "$notify" "$cfg" || done_msgs+=("⚠️  Codex  →  existing 'notify' in $cfg left untouched")
+    return
   fi
   cp "$cfg" "$cfg.bak.$(date +%s)" 2>/dev/null || true
   printf 'notify = ["%s", "--agent", "Codex"]\n%s' "$notify" "$(cat "$cfg")" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
-  done_msgs+=("✅ Codex  →  $cfg")
+  done_msgs+=("🔔 Codex notify  →  $cfg")
 }
 
-# --- Aider: ~/.aider.conf.yml, notifications-command (no payload) ---
+# Aider: notifications-command (no decision channel — notify only).
 wire_aider() {
   local cfg="$HOME/.aider.conf.yml"; [[ -f "$cfg" ]] || : > "$cfg"
   if grep -qE '^[[:space:]]*notifications-command[[:space:]]*:' "$cfg"; then
@@ -90,18 +57,73 @@ wire_aider() {
   fi
   cp "$cfg" "$cfg.bak.$(date +%s)" 2>/dev/null || true
   printf '\nnotifications: true\nnotifications-command: %s --agent Aider\n' "$notify" >> "$cfg"
-  done_msgs+=("✅ Aider  →  $cfg")
+  done_msgs+=("🔔 Aider notify  →  $cfg")
 }
 
-# --- wire whatever is installed (or already has a config dir) ---
-merge_json_hook "$HOME/.claude/settings.json" "Claude Code"      # Claude is why we're here
-{ have gemini || [[ -d $HOME/.gemini ]]; } && merge_json_hook "$HOME/.gemini/settings.json" "Gemini" || done_msgs+=("—  Gemini not found, skipped")
-{ have cursor || have cursor-agent || [[ -d $HOME/.cursor ]]; } && wire_cursor || done_msgs+=("—  Cursor not found, skipped")
-{ have codex || [[ -d $HOME/.codex ]]; } && wire_codex || done_msgs+=("—  Codex not found, skipped")
-{ have aider || [[ -f $HOME/.aider.conf.yml ]]; } && wire_aider || done_msgs+=("—  Aider not found, skipped")
-[[ $WITH_APPROVE -eq 1 ]] && wire_approve
+# ---------- approval hooks (Approve/Decline dialog that returns a decision) ----------
+# Claude (PreToolUse), Gemini (BeforeTool), Codex hooks.json (PermissionRequest) share
+# the {event:[{matcher,hooks:[{type,command}]}]} shape.
+merge_approve_hook() { # <settings-file> <event> <matcher> <agent-flag>
+  local settings="$1" event="$2" matcher="$3" ag="$4"
+  mkdir -p "$(dirname "$settings")"; [[ -f "$settings" ]] || echo '{}' > "$settings"
+  cp "$settings" "$settings.bak.$(date +%s)"; chmod 600 "$settings.bak."* 2>/dev/null || true
+  local tmp; tmp="$(mktemp)"
+  jq --arg cmd "$approve --agent $ag" --arg p "$approve" --arg e "$event" --arg m "$matcher" '
+    .hooks[$e] =
+      (((.hooks // {})[$e] // [])
+       | map(select((.hooks // []) | map(.command) | map(contains($p)) | any | not))
+       + [{"matcher":$m,"hooks":[{"type":"command","command":$cmd}]}])
+  ' "$settings" > "$tmp" || { echo "jq failed for approve $ag" >&2; return 1; }
+  mv "$tmp" "$settings"; chmod 600 "$settings"
+  done_msgs+=("🔐 $ag approve  →  $settings ($event)")
+}
+
+# Cursor: one file holds both notify (stop) and, when approving, the decision hooks
+# (beforeShellExecution/beforeMCPExecution). $1 = approve|notify for the before* events.
+wire_cursor() { # <mode: approve|notify>
+  local mode="$1"; local cfg="$HOME/.cursor/hooks.json"; mkdir -p "$HOME/.cursor"
+  [[ -f "$cfg" ]] || echo '{"version":1,"hooks":{}}' > "$cfg"
+  cp "$cfg" "$cfg.bak.$(date +%s)"
+  local before; [[ "$mode" == approve ]] && before="$approve --agent cursor" || before="$notify --agent Cursor"
+  local tmp; tmp="$(mktemp)"
+  # dedup drops any prior entry pointing at either of our scripts, so switching modes replaces cleanly.
+  jq --arg bc "$before" --arg sc "$notify --agent Cursor" --arg np "$notify" --arg ap "$approve" '
+    def clean: map(select((.command // "") | (contains($np) or contains($ap)) | not));
+    .version = (.version // 1) | .hooks = (.hooks // {})
+    | .hooks.beforeShellExecution = (((.hooks.beforeShellExecution) // []) | clean + [{"command":$bc}])
+    | .hooks.beforeMCPExecution   = (((.hooks.beforeMCPExecution)   // []) | clean + [{"command":$bc}])
+    | .hooks.stop                 = (((.hooks.stop)                 // []) | clean + [{"command":$sc}])
+  ' "$cfg" > "$tmp" || { echo "jq failed for cursor" >&2; return 1; }
+  mv "$tmp" "$cfg"
+  done_msgs+=("$([[ $mode == approve ]] && echo 🔐 || echo 🔔) Cursor  →  $cfg (before*Execution → $mode, stop → notify)")
+}
+
+# ---------- dispatch ----------
+G=0; { have gemini || [[ -d $HOME/.gemini ]]; } && G=1
+C=0; { have cursor || have cursor-agent || [[ -d $HOME/.cursor ]]; } && C=1
+X=0; { have codex  || [[ -d $HOME/.codex ]];  } && X=1
+A=0; { have aider  || [[ -f $HOME/.aider.conf.yml ]]; } && A=1
+
+# notifications
+merge_json_hook "$HOME/.claude/settings.json" "Claude Code"          # Claude is why we're here
+[[ $G -eq 1 ]] && merge_json_hook "$HOME/.gemini/settings.json" "Gemini" || { [[ $G -eq 0 ]] && done_msgs+=("—  Gemini not found, skipped"); }
+[[ $X -eq 1 ]] && wire_codex_notify || { [[ $X -eq 0 ]] && done_msgs+=("—  Codex not found, skipped"); }
+[[ $A -eq 1 ]] && wire_aider        || { [[ $A -eq 0 ]] && done_msgs+=("—  Aider not found, skipped"); }
+[[ $C -eq 1 ]] && wire_cursor "$([[ $WITH_APPROVE -eq 1 ]] && echo approve || echo notify)" \
+               || { [[ $C -eq 0 ]] && done_msgs+=("—  Cursor not found, skipped"); }
+
+# approval dialog (default on)
+if [[ $WITH_APPROVE -eq 1 ]]; then
+  merge_approve_hook "$HOME/.claude/settings.json" PreToolUse "Bash|Edit|Write|MultiEdit|NotebookEdit" claude
+  [[ $G -eq 1 ]] && merge_approve_hook "$HOME/.gemini/settings.json" BeforeTool "run_shell_command|write_file|replace_file_section" gemini
+  [[ $X -eq 1 ]] && merge_approve_hook "$HOME/.codex/hooks.json" PermissionRequest ".*" codex
+fi
 
 printf '\n'; for m in "${done_msgs[@]}"; do echo "  $m"; done; printf '\n'
 echo "  Test:  $notify --test"
-[[ $WITH_APPROVE -eq 0 ]] && echo "  Approve/Decline from a dialog (Claude Code): re-run with  ./install.sh --approve"
+if [[ $WITH_APPROVE -eq 1 ]]; then
+  echo "  Approve/Decline dialog: ON (Claude, Cursor, Gemini, Codex). Disable with  ./install.sh --no-approve"
+else
+  echo "  Notifications only. Enable the Approve/Decline dialog by re-running without --no-approve"
+fi
 exit 0
