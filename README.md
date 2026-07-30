@@ -1,0 +1,66 @@
+# agentnotify
+
+Native desktop notification when **any AI coding agent needs you** — approval or your turn — popped
+over whatever app you're in, so you don't sit staring at a blocked terminal. macOS + Windows.
+
+Supported agents: **Claude Code, Codex CLI, Gemini CLI, Cursor, Aider.**
+
+> **Status:** macOS is tested end-to-end (Claude Code, live). The Windows notifier + installer
+> logic is validated on PowerShell 7.4; the WinRT toast *display* itself still needs testing on real
+> Windows hardware — reports welcome.
+
+## Install
+
+macOS / Linux:
+
+```bash
+./install.sh
+```
+
+Windows (PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+The installer wires **every agent it finds installed** (and skips the rest — re-run after installing
+more). It backs up each config first and is idempotent. For macOS **click-to-focus** (clicking the
+notification jumps you back to the terminal):
+
+```bash
+brew install terminal-notifier
+```
+
+## Test
+
+```bash
+./notify.sh --test                                    # macOS/Linux
+powershell -ExecutionPolicy Bypass -File notify.ps1 -Test   # Windows
+```
+
+## How it works
+
+Every agent can run a command when it's blocked on you. The installer points each one at the notifier
+([`notify.sh`](notify.sh) / [`notify.ps1`](notify.ps1)), which reads the event and posts a native
+notification. No daemon, no background process.
+
+| Agent | Config it wires | Event | Payload |
+|---|---|---|---|
+| Claude Code | `~/.claude/settings.json` → `hooks.Notification` | permission / idle | stdin JSON |
+| Gemini CLI | `~/.gemini/settings.json` → `hooks.Notification` | tool permission | stdin JSON |
+| Cursor | `~/.cursor/hooks.json` → `beforeShellExecution`, `beforeMCPExecution`, `stop` | about to run a command / your turn¹ | stdin JSON |
+| Codex CLI | `~/.codex/config.toml` → `notify` | turn complete | JSON arg |
+| Aider | `~/.aider.conf.yml` → `notifications-command` | waiting for input | none |
+
+¹ Cursor has no hook that fires *only* when it's blocked on command approval yet
+([open request](https://forum.cursor.com/t/fire-a-hook-when-agent-waits-for-command-tool-approval/166947)).
+`beforeShellExecution` / `beforeMCPExecution` fire the moment Cursor is about to run a command — i.e.
+when it pauses to ask you (default settings). If you run Cursor with command auto-run enabled, these
+fire per command without a real stall, so you'll get more notifications; `stop` alone is quieter.
+
+Uninstall: restore a `*.bak.*` file next to any config, or delete the entry the installer added.
+
+---
+
+`docs/technical-design.md` is the deferred "daemon + plugin SDK + GUI" vision. This is the version that
+works today.
