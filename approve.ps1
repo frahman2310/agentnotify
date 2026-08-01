@@ -24,7 +24,8 @@ if ($raw.Trim()) {
 $summary = if ($detail) { "$tool - $detail" } else { $tool }
 if ($summary.Length -gt 300) { $summary = $summary.Substring(0, 300) }
 $name = switch ($Agent) { "cursor" { "Cursor" } "gemini" { "Gemini" } "codex" { "Codex" } default { "Claude" } }
-$msg = "$name$proj wants to run: $summary"
+$msg = "$name wants to run: $summary"
+$caption = "Approve$proj?"   # project in the title → distinguishable when stacked
 
 function Emit-Allow {
   switch ($Agent) {
@@ -57,7 +58,11 @@ $choice = $env:AGENTNOTIFY_MOCK_CHOICE
 if (-not $env:AGENTNOTIFY_MOCK) {
   try {
     Add-Type -AssemblyName System.Windows.Forms
-    $r = [System.Windows.Forms.MessageBox]::Show($msg, "Approve tool use?", "YesNo", "Question")
+    # Default to No (Decline) so a stray Enter can't auto-approve.
+    $r = [System.Windows.Forms.MessageBox]::Show($msg, $caption,
+      [System.Windows.Forms.MessageBoxButtons]::YesNo,
+      [System.Windows.Forms.MessageBoxIcon]::Question,
+      [System.Windows.Forms.MessageBoxDefaultButton]::Button2)
     switch ("$r") { "Yes" { $choice = "Approve" } "No" { $choice = "Decline" } default { $choice = "" } }
   } catch { $choice = "" }   # can't show a dialog → defer (never auto-approve)
 }

@@ -29,7 +29,7 @@ done
 # which silently defers every decision. `--check` compiles this to catch that.
 dialog_script() { # <escaped-message> <escaped-title>
   cat <<EOF
-set res to (display dialog "$1" with title "$2" buttons {"Decline","Approve"} default button "Approve" giving up after 120)
+set res to (display dialog "$1" with title "$2" buttons {"Decline","Approve"} giving up after 120)
 if gave up of res then
 	return ""
 else
