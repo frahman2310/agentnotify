@@ -58,6 +58,17 @@ function Merge-ApproveHook($settings, $event, $matcher, $ag) {
   $script:log += "approve $ag  ->  $settings ($event)"
 }
 
+function Strip-Event($settings, $event, $needle) {
+  if (-not (Test-Path $settings)) { return }
+  $o = Get-Content $settings -Raw | ConvertFrom-Json -AsHashtable
+  if (-not $o -or ($o.hooks -isnot [hashtable]) -or -not $o.hooks.ContainsKey($event)) { return }
+  $o.hooks[$event] = @(@($o.hooks[$event]) | Where-Object {
+    $c = @(); if ($_.hooks) { $c = @($_.hooks | ForEach-Object { $_.command }) }
+    ($c -join ' ') -notlike "*$needle*"
+  })
+  ($o | ConvertTo-Json -Depth 20) | Set-Content $settings
+}
+
 # --- Cursor: before*Execution -> approve (or notify); stop -> notify ---
 function Wire-Cursor($mode) {
   $cfg = Join-Path $home_ ".cursor\hooks.json"
@@ -118,7 +129,9 @@ if ($A) { Wire-Aider } else { $log += "--  Aider skipped" }
 if ($C) { Wire-Cursor $cursorMode } else { $log += "--  Cursor skipped" }
 
 if ($doApprove) {
-  Merge-ApproveHook (Join-Path $home_ ".claude\settings.json") "PreToolUse" "Bash|Edit|Write|MultiEdit|NotebookEdit" "claude"
+  # Claude PermissionRequest fires only when Claude would actually ask (respects the mode).
+  Strip-Event (Join-Path $home_ ".claude\settings.json") "PreToolUse" $approveScript
+  Merge-ApproveHook (Join-Path $home_ ".claude\settings.json") "PermissionRequest" ".*" "claude"
   if ($G) { Merge-ApproveHook (Join-Path $home_ ".gemini\settings.json") "BeforeTool" "run_shell_command|write_file|replace_file_section" "gemini" }
   if ($X) { Merge-ApproveHook (Join-Path $home_ ".codex\hooks.json") "PermissionRequest" ".*" "codex" }
 }

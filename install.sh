@@ -78,6 +78,15 @@ merge_approve_hook() { # <settings-file> <event> <matcher> <agent-flag>
   done_msgs+=("🔐 $ag approve  →  $settings ($event)")
 }
 
+# Remove our hook from a given event (used to migrate Claude off the old PreToolUse wiring).
+strip_event() { # <settings-file> <event> <needle>
+  local settings="$1" event="$2" needle="$3"; [[ -f "$settings" ]] || return 0
+  local tmp; tmp="$(mktemp)"
+  jq --arg e "$event" --arg n "$needle" '
+    if (.hooks[$e]) then .hooks[$e] = ((.hooks[$e]) | map(select((.hooks // []) | map(.command) | map(contains($n)) | any | not))) else . end
+  ' "$settings" > "$tmp" && mv "$tmp" "$settings"
+}
+
 # Cursor: one file holds both notify (stop) and, when approving, the decision hooks
 # (beforeShellExecution/beforeMCPExecution). $1 = approve|notify for the before* events.
 wire_cursor() { # <mode: approve|notify>
@@ -112,9 +121,14 @@ merge_json_hook "$HOME/.claude/settings.json" "Claude Code"          # Claude is
 [[ $C -eq 1 ]] && wire_cursor "$([[ $WITH_APPROVE -eq 1 ]] && echo approve || echo notify)" \
                || { [[ $C -eq 0 ]] && done_msgs+=("—  Cursor not found, skipped"); }
 
-# approval dialog (default on)
+# approval dialog (default on).
+# Claude PermissionRequest fires ONLY when Claude would actually ask you — it respects the
+# permission mode (silent in auto/bypassPermissions, skips edits in acceptEdits, fires in
+# default/plan). So no matcher gymnastics and no over-prompting. Migrate off the old, too-
+# frequent PreToolUse wiring first.
 if [[ $WITH_APPROVE -eq 1 ]]; then
-  merge_approve_hook "$HOME/.claude/settings.json" PreToolUse "Bash|Edit|Write|MultiEdit|NotebookEdit" claude
+  strip_event "$HOME/.claude/settings.json" PreToolUse "$approve"
+  merge_approve_hook "$HOME/.claude/settings.json" PermissionRequest ".*" claude
   [[ $G -eq 1 ]] && merge_approve_hook "$HOME/.gemini/settings.json" BeforeTool "run_shell_command|write_file|replace_file_section" gemini
   [[ $X -eq 1 ]] && merge_approve_hook "$HOME/.codex/hooks.json" PermissionRequest ".*" codex
 fi

@@ -34,18 +34,27 @@ Approve/Decline and return the decision to the agent. No daemon.
 
 | Agent | Notify event | **Approve** event → what it does |
 |---|---|---|
-| Claude Code | `Notification` (idle/permission) | `PreToolUse` (Bash/Edit/Write/…) → `permissionDecision: allow\|deny` |
+| Claude Code | `Notification` (idle/permission) | **`PermissionRequest`** → `decision.behavior: allow\|deny` |
 | Cursor | `stop` | `beforeShellExecution`, `beforeMCPExecution` → `{"permission":"allow\|deny"}` |
 | Gemini CLI | `Notification` | `BeforeTool` (shell/write/replace) → deny via `{"decision":"deny"}`, allow = default |
 | Codex CLI | `config.toml` `notify` (turn complete) | `hooks.json` `PermissionRequest` → `decision.behavior: allow\|deny` |
 | Aider | `notifications-command` | — (no decision channel; notify only) |
 
 Approve → the command runs. Decline → it's blocked. **Timeout (120s) / Esc → defer** to the agent's own
-prompt — a timeout **never** auto-approves. (Gemini has no neutral channel, so its timeout denies.)
+prompt — a timeout **never** auto-approves (Gemini has no neutral channel, so its timeout denies), and
+there is **no default button** so a stray Enter can't approve anything.
 
-Scope: approvals fire for **mutating tools** (shell/edit/write); read-only tools don't prompt. On
-by default because it replaces the in-terminal permission prompt — that's the point. `--no-approve`
-opts out.
+**Synced to Claude's permission mode.** Claude Code uses the `PermissionRequest` hook, which fires
+**only when Claude itself would stop and ask** — it is silent in `auto`/`bypassPermissions`, skips
+edits in `acceptEdits`, and fires in `default`/`plan`. So you're prompted only when the run genuinely
+can't proceed without you, matching your current mode. (Cursor/Gemini expose no equivalent "only when
+asking" event, so they fire before matched tools; if you run those with auto-run on, expect more
+prompts.) On by default; `--no-approve` (`-NoApprove` on Windows) opts out.
+
+**Bigger multi-option popup.** If a hook payload carries an `options`/`choices` array, the approver
+shows a scrollable `choose from list` picker instead of Approve/Decline and returns your selection.
+(Claude Code does not currently feed its own in-chat multiple-choice prompts to hooks, so this
+auto-triggers for structured option sets — e.g. MCP elicitations — not free-form chat questions.)
 
 ## Test
 
