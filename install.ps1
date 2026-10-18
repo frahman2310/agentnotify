@@ -13,28 +13,31 @@ $home_         = $env:USERPROFILE
 $log = @()
 
 function Have($cmd) { $null -ne (Get-Command $cmd -ErrorAction SilentlyContinue) }
-function RunCmd($label)  { "powershell -ExecutionPolicy Bypass -File `"$notify`" -Agent `"$label`"" }
+function RunCmd($label, $nevent)  { "powershell -ExecutionPolicy Bypass -File `"$notify`" -Agent `"$label`" -Event $nevent" }
 function ApproveCmd($ag) { "powershell -ExecutionPolicy Bypass -File `"$approveScript`" -Agent $ag" }
 
-# --- notify: Claude & Gemini hooks.Notification ---
-function Merge-JsonHook($settings, $label) {
+# --- notify: Claude & Gemini JSON settings, wire <event> (optional <matcher>) with --event
+# attention (always) or complete (notifier only fires complete for approved projects) ---
+function Merge-NotifyHook($settings, $event, $matcher, $label, $nevent) {
   $d = Split-Path -Parent $settings; if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force $d | Out-Null }
   if (-not (Test-Path $settings)) { "{}" | Set-Content $settings }
   Copy-Item $settings "$settings.bak.$(Get-Date -UFormat %s)" -Force
-  $cmd = RunCmd $label
+  $cmd = RunCmd $label $nevent
   $o = Get-Content $settings -Raw | ConvertFrom-Json -AsHashtable
   if (-not $o) { $o = @{} }
   if (($o.hooks -isnot [hashtable])) { $o.hooks = @{} }
   $existing = @()
-  if ($o.hooks.ContainsKey('Notification')) {
-    $existing = @($o.hooks.Notification) | Where-Object {
+  if ($o.hooks.ContainsKey($event)) {
+    $existing = @($o.hooks[$event]) | Where-Object {
       $c = @(); if ($_.hooks) { $c = @($_.hooks | ForEach-Object { $_.command }) }
       ($c -join ' ') -notlike "*$notify*"
     }
   }
-  $o.hooks.Notification = @($existing) + @(@{ hooks = @(@{ type = 'command'; command = $cmd }) })
+  $entry = @{ hooks = @(@{ type = 'command'; command = $cmd }) }
+  if ($matcher) { $entry.matcher = $matcher }
+  $o.hooks[$event] = @($existing) + @($entry)
   ($o | ConvertTo-Json -Depth 20) | Set-Content $settings
-  $script:log += "notify  $label  ->  $settings"
+  $script:log += "$label $nevent  ->  $settings ($event)"
 }
 
 # --- approve: Claude (PreToolUse), Gemini (BeforeTool), Codex hooks.json (PermissionRequest) ---
@@ -75,8 +78,8 @@ function Wire-Cursor($mode) {
   $d = Split-Path -Parent $cfg; if (-not (Test-Path $d)) { New-Item -ItemType Directory -Force $d | Out-Null }
   if (-not (Test-Path $cfg)) { '{"version":1,"hooks":{}}' | Set-Content $cfg }
   Copy-Item $cfg "$cfg.bak.$(Get-Date -UFormat %s)" -Force
-  $before = if ($mode -eq 'approve') { ApproveCmd 'cursor' } else { RunCmd 'Cursor' }
-  $stop = RunCmd 'Cursor'
+  $before = if ($mode -eq 'approve') { ApproveCmd 'cursor' } else { RunCmd 'Cursor' 'attention' }
+  $stop = RunCmd 'Cursor' 'complete'   # stop = work finished (gated completion)
   $o = Get-Content $cfg -Raw | ConvertFrom-Json -AsHashtable
   if (-not $o) { $o = @{} }
   if (-not $o.ContainsKey('version')) { $o.version = 1 }
@@ -99,9 +102,9 @@ function Wire-CodexNotify {
   if (Select-String -Path $cfg -Pattern '^\s*notify\s*=' -Quiet) { $script:log += "WARN Codex notify left untouched ($cfg)"; return }
   Copy-Item $cfg "$cfg.bak.$(Get-Date -UFormat %s)" -Force
   $esc  = $notify -replace '\\','\\'
-  $line = "notify = [`"powershell`", `"-ExecutionPolicy`", `"Bypass`", `"-File`", `"$esc`", `"-Agent`", `"Codex`"]"
+  $line = "notify = [`"powershell`", `"-ExecutionPolicy`", `"Bypass`", `"-File`", `"$esc`", `"-Agent`", `"Codex`", `"-Event`", `"complete`"]"
   ($line + "`n" + (Get-Content $cfg -Raw)) | Set-Content $cfg
-  $script:log += "notify  Codex  ->  $cfg"
+  $script:log += "Codex complete  ->  $cfg"
 }
 
 # --- Aider: notifications-command (notify only) ---
@@ -110,8 +113,8 @@ function Wire-Aider {
   if ((Test-Path $cfg) -and (Select-String -Path $cfg -Pattern '^\s*notifications-command\s*:' -Quiet)) {
     $script:log += "WARN Aider notifications-command left untouched"; return
   }
-  Add-Content $cfg "`nnotifications: true`nnotifications-command: powershell -ExecutionPolicy Bypass -File `"$notify`" -Agent Aider"
-  $script:log += "notify  Aider  ->  $cfg"
+  Add-Content $cfg "`nnotifications: true`nnotifications-command: powershell -ExecutionPolicy Bypass -File `"$notify`" -Agent Aider -Event complete"
+  $script:log += "Aider complete  ->  $cfg"
 }
 
 # --- dispatch ---
@@ -122,8 +125,12 @@ $A = (Have "aider")  -or (Test-Path (Join-Path $home_ ".aider.conf.yml"))
 $doApprove = -not $NoApprove
 $cursorMode = if ($doApprove) { 'approve' } else { 'notify' }
 
-Merge-JsonHook (Join-Path $home_ ".claude\settings.json") "Claude Code"
-if ($G) { Merge-JsonHook (Join-Path $home_ ".gemini\settings.json") "Gemini" } else { $log += "--  Gemini skipped" }
+Merge-NotifyHook (Join-Path $home_ ".claude\settings.json") "Notification" "permission_prompt" "Claude Code" "attention"
+Merge-NotifyHook (Join-Path $home_ ".claude\settings.json") "Stop" "" "Claude Code" "complete"
+if ($G) {
+  Merge-NotifyHook (Join-Path $home_ ".gemini\settings.json") "Notification" "" "Gemini" "attention"
+  Merge-NotifyHook (Join-Path $home_ ".gemini\settings.json") "AfterAgent" "" "Gemini" "complete"
+} else { $log += "--  Gemini skipped" }
 if ($X) { Wire-CodexNotify } else { $log += "--  Codex skipped" }
 if ($A) { Wire-Aider } else { $log += "--  Aider skipped" }
 if ($C) { Wire-Cursor $cursorMode } else { $log += "--  Cursor skipped" }
@@ -140,3 +147,6 @@ if ($doApprove) {
 "Test:  powershell -ExecutionPolicy Bypass -File `"$notify`" -Test"
 if ($doApprove) { "Approve/Decline dialog: ON (Claude, Cursor, Gemini, Codex). Disable with  -NoApprove" }
 else { "Notifications only. Re-run without -NoApprove to enable the Approve/Decline dialog" }
+$approvedScript = Join-Path $dir "approved.ps1"
+"Work-completed alerts fire only for APPROVED projects. Approve this one:"
+"   powershell -ExecutionPolicy Bypass -File `"$approvedScript`" add    (then: list | rm | clear)"

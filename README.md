@@ -7,6 +7,9 @@ Two things for AI coding agents, so you stop wasting time at a blocked terminal:
 2. **Approve / Decline in the popup** — for agents that can process a decision, a floating
    **Approve/Decline** dialog pops over your current app and *actually allows or blocks* the command.
    No rerouting to the terminal.
+3. **"Work completed" alerts for approved chats** — a popup when an agent finishes, but **only for
+   projects you've approved** (you curate the list as priorities shift — see
+   [Work-completed alerts](#work-completed-alerts)).
 
 macOS + Windows. Supported agents: **Claude Code, Codex CLI, Gemini CLI, Cursor, Aider.**
 
@@ -32,13 +35,13 @@ on Tahoe (`terminal-notifier`/`alerter` banners get silently dropped there). **A
 ([`approve.sh`](approve.sh)/[`approve.ps1`](approve.ps1)) pop a floating `display dialog` with
 Approve/Decline and return the decision to the agent. No daemon.
 
-| Agent | Notify event | **Approve** event → what it does |
-|---|---|---|
-| Claude Code | `Notification` (idle/permission) | **`PermissionRequest`** → `decision.behavior: allow\|deny` |
-| Cursor | `stop` | `beforeShellExecution`, `beforeMCPExecution` → `{"permission":"allow\|deny"}` |
-| Gemini CLI | `Notification` | `BeforeTool` (shell/write/replace) → deny via `{"decision":"deny"}`, allow = default |
-| Codex CLI | `config.toml` `notify` (turn complete) | `hooks.json` `PermissionRequest` → `decision.behavior: allow\|deny` |
-| Aider | `notifications-command` | — (no decision channel; notify only) |
+| Agent | Attention (needs-you) | **Approve** event → what it does | Completed (gated) |
+|---|---|---|---|
+| Claude Code | `Notification` (permission) | **`PermissionRequest`** → `decision.behavior: allow\|deny` | `Stop` |
+| Cursor | `beforeShellExecution` (notify mode) | `beforeShellExecution`, `beforeMCPExecution` → `{"permission":"allow\|deny"}` | `stop` |
+| Gemini CLI | `Notification` | `BeforeTool` (shell/write/replace) → deny via `{"decision":"deny"}`, allow = default | `AfterAgent` |
+| Codex CLI | — | `hooks.json` `PermissionRequest` → `decision.behavior: allow\|deny` | `config.toml notify` (turn complete) |
+| Aider | — | — (no decision channel) | `notifications-command` |
 
 Approve → the command runs. Decline → it's blocked. **Timeout (120s) / Esc → defer** to the agent's own
 prompt — a timeout **never** auto-approves (Gemini has no neutral channel, so its timeout denies), and
@@ -50,6 +53,27 @@ edits in `acceptEdits`, and fires in `default`/`plan`. So you're prompted only w
 can't proceed without you, matching your current mode. (Cursor/Gemini expose no equivalent "only when
 asking" event, so they fire before matched tools; if you run those with auto-run on, expect more
 prompts.) On by default; `--no-approve` (`-NoApprove` on Windows) opts out.
+
+### Work-completed alerts
+
+A "✅ done" popup when an agent finishes a turn (Claude `Stop`, Gemini `AfterAgent`, Cursor `stop`,
+Codex turn-complete, Aider waiting-for-input) — but **only for projects on an approved list**, so you
+aren't pinged by every chat. The list starts empty (nothing fires) and you curate it as priorities
+shift:
+
+```bash
+./approved.sh add          # approve the current project
+./approved.sh list         # show approved projects
+./approved.sh rm [dir]     # stop alerts for a project
+./approved.sh clear        # remove all
+# Windows: powershell -ExecutionPolicy Bypass -File approved.ps1 add
+```
+
+Matching is by project directory (every hook payload carries `cwd`; the hook also runs *in* the
+project dir as a fallback). A directory match covers everything under it, and a line with `*` is a
+glob. The list lives at `~/.agentnotify/approved` (override with `$AGENTNOTIFY_APPROVED`). To keep the
+"only approved" rule honest, Claude's idle banner is scoped to permission alerts only, so completion
+comes solely from the gated `Stop` — an unapproved chat is fully silent on completion.
 
 **Bigger multi-option popup.** If a hook payload carries an `options`/`choices` array, the approver
 shows a scrollable `choose from list` picker instead of Approve/Decline and returns your selection.
