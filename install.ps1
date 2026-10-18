@@ -148,5 +148,5 @@ if ($doApprove) {
 if ($doApprove) { "Approve/Decline dialog: ON (Claude, Cursor, Gemini, Codex). Disable with  -NoApprove" }
 else { "Notifications only. Re-run without -NoApprove to enable the Approve/Decline dialog" }
 $approvedScript = Join-Path $dir "approved.ps1"
-"Work-completed alerts fire only for APPROVED projects. Approve this one:"
-"   powershell -ExecutionPolicy Bypass -File `"$approvedScript`" add    (then: list | rm | clear)"
+"Work-completed alerts are OFF by default — they need BOTH an enabled agent AND an approved project:"
+"   ...approved.ps1 agent add claude   then   ...approved.ps1 add    (approved.ps1 list to review)"

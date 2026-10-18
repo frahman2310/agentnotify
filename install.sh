@@ -152,6 +152,6 @@ if [[ $WITH_APPROVE -eq 1 ]]; then
 else
   echo "  Notifications only. Enable the Approve/Decline dialog by re-running without --no-approve"
 fi
-echo "  Work-completed alerts fire only for APPROVED projects. Approve this one:"
-echo "     $approved add        (then: $approved list | rm | clear)"
+echo "  Work-completed alerts are OFF by default — they need BOTH an enabled agent AND an approved project:"
+echo "     $approved agent add claude   &&   $approved add        ($approved list to review)"
 exit 0

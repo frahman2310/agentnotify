@@ -32,7 +32,7 @@ if ($raw.Trim()) { try { $o = $raw | ConvertFrom-Json; if ($o.cwd) { $cwd = [str
 if (-not $cwd) { $cwd = (Get-Location).Path }
 $proj = if ($cwd) { Split-Path -Leaf $cwd } else { "" }
 
-# "Work completed" alerts fire ONLY for approved projects (curate with approved.ps1).
+# "Work completed" alerts require BOTH gates: agent enabled AND project approved (approved.ps1).
 function Is-Approved($dir) {
   $file = if ($env:AGENTNOTIFY_APPROVED) { $env:AGENTNOTIFY_APPROVED } else { Join-Path $env:USERPROFILE ".agentnotify\approved" }
   if (-not (Test-Path $file)) { return $false }
@@ -43,10 +43,21 @@ function Is-Approved($dir) {
   }
   return $false
 }
+function Is-AgentEnabled($a) {
+  $file = if ($env:AGENTNOTIFY_AGENTS) { $env:AGENTNOTIFY_AGENTS } else { Join-Path $env:USERPROFILE ".agentnotify\agents" }
+  if (-not (Test-Path $file)) { return $false }
+  foreach ($line in Get-Content $file) {
+    $l = $line.Trim(); if (-not $l -or $l.StartsWith('#')) { continue }
+    if ($l -eq $a -or $l -eq '*') { return $true }
+  }
+  return $false
+}
 
 $has = { param($k) $o -and ($o.PSObject.Properties.Name -contains $k) -and $o.$k }
 if ($Event -eq "complete") {
-  if (-not (Is-Approved $cwd)) { if ($DryRun) { Write-Output "SILENT (not approved): $cwd" }; exit 0 }
+  $akey = ($Agent -split '\s+')[0].ToLower()
+  if (-not (Is-AgentEnabled $akey)) { if ($DryRun) { Write-Output "SILENT (agent '$akey' not enabled)" }; exit 0 }
+  if (-not (Is-Approved $cwd)) { if ($DryRun) { Write-Output "SILENT (project not approved): $cwd" }; exit 0 }
   if     (& $has 'last-assistant-message') { $msg = [string]$o.'last-assistant-message' }
   elseif (& $has 'message')                { $msg = [string]$o.'message' }
   else                                     { $msg = "finished — your turn" }

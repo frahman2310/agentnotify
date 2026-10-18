@@ -33,8 +33,10 @@ get() { jq -r "$1 // empty" <<<"$json" 2>/dev/null || true; }
 cwd="$(get '.cwd')"; [[ -z "$cwd" ]] && cwd="$PWD"
 proj="$(basename "$cwd" 2>/dev/null || true)"
 
-# "Work completed" notifications fire ONLY for approved projects (curate with approved.sh).
+# "Work completed" notifications require BOTH gates: the agent must be enabled AND the
+# project approved. Both lists default empty, so completion is OFF until you opt in.
 APPROVED="${AGENTNOTIFY_APPROVED:-$HOME/.agentnotify/approved}"
+AGENTS="${AGENTNOTIFY_AGENTS:-$HOME/.agentnotify/agents}"
 is_approved() { # <dir>
   local dir="$1" line; [[ -f "$APPROVED" ]] || return 1
   while IFS= read -r line; do
@@ -46,10 +48,23 @@ is_approved() { # <dir>
   done < "$APPROVED"
   return 1
 }
+is_agent_enabled() { # <agent-key>
+  local a="$1" line; [[ -f "$AGENTS" ]] || return 1
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" == "$a" || "$line" == "*" ]] && return 0
+  done < "$AGENTS"
+  return 1
+}
 
 if [[ "$event" == complete ]]; then
+  akey="${agent%% *}"; akey="$(printf '%s' "$akey" | tr '[:upper:]' '[:lower:]')"
+  if ! is_agent_enabled "$akey"; then
+    [[ -n "${AGENTNOTIFY_DRYRUN:-}" ]] && echo "SILENT (agent '$akey' not enabled)"
+    exit 0                              # agent not opted in → stay silent
+  fi
   if ! is_approved "$cwd"; then
-    [[ -n "${AGENTNOTIFY_DRYRUN:-}" ]] && echo "SILENT (not approved): $cwd"
+    [[ -n "${AGENTNOTIFY_DRYRUN:-}" ]] && echo "SILENT (project not approved): $cwd"
     exit 0                              # unapproved chat → stay silent
   fi
   msg="$(get '.["last-assistant-message"]')"

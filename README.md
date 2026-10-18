@@ -57,23 +57,29 @@ prompts.) On by default; `--no-approve` (`-NoApprove` on Windows) opts out.
 ### Work-completed alerts
 
 A "✅ done" popup when an agent finishes a turn (Claude `Stop`, Gemini `AfterAgent`, Cursor `stop`,
-Codex turn-complete, Aider waiting-for-input) — but **only for projects on an approved list**, so you
-aren't pinged by every chat. The list starts empty (nothing fires) and you curate it as priorities
-shift:
+Codex turn-complete, Aider waiting-for-input). **Off by default** — it fires only when **both** gates
+pass, so you aren't pinged by every chat:
+
+1. the **agent** is enabled, and
+2. the chat's **project** is approved.
+
+Both lists start empty. Curate them as priorities shift:
 
 ```bash
-./approved.sh add          # approve the current project
-./approved.sh list         # show approved projects
-./approved.sh rm [dir]     # stop alerts for a project
-./approved.sh clear        # remove all
-# Windows: powershell -ExecutionPolicy Bypass -File approved.ps1 add
+./approved.sh agent add claude   # enable an agent (claude|cursor|gemini|codex|aider, or '*' for all)
+./approved.sh add                # approve the current project (default: cwd)
+./approved.sh list               # show both gates and the effective rule
+./approved.sh rm [dir]           # stop alerts for a project
+./approved.sh agent rm claude    # disable an agent
+./approved.sh clear              # remove all projects   (agent clear = disable all agents)
+# Windows: powershell -ExecutionPolicy Bypass -File approved.ps1 agent add claude
 ```
 
-Matching is by project directory (every hook payload carries `cwd`; the hook also runs *in* the
-project dir as a fallback). A directory match covers everything under it, and a line with `*` is a
-glob. The list lives at `~/.agentnotify/approved` (override with `$AGENTNOTIFY_APPROVED`). To keep the
-"only approved" rule honest, Claude's idle banner is scoped to permission alerts only, so completion
-comes solely from the gated `Stop` — an unapproved chat is fully silent on completion.
+Project matching is by directory (every hook payload carries `cwd`; the hook also runs *in* the project
+dir as a fallback). A directory match covers everything under it, and a line with `*` is a glob. Lists
+live at `~/.agentnotify/{approved,agents}` (override via `$AGENTNOTIFY_APPROVED` / `$AGENTNOTIFY_AGENTS`).
+To keep the gate honest, Claude's idle banner is scoped to permission alerts only, so completion comes
+solely from the gated `Stop` — an unapproved chat is fully silent on completion.
 
 **Bigger multi-option popup.** If a hook payload carries an `options`/`choices` array, the approver
 shows a scrollable `choose from list` picker instead of Approve/Decline and returns your selection.
