@@ -32,6 +32,14 @@ if ($raw.Trim()) { try { $o = $raw | ConvertFrom-Json; if ($o.cwd) { $cwd = [str
 if (-not $cwd) { $cwd = (Get-Location).Path }
 $proj = if ($cwd) { Split-Path -Leaf $cwd } else { "" }
 
+# Per-chat master switch (Spare Cycles panel toggle / notify-toggle): a muted session gets
+# NO AgentNotify popups at all.
+$sid = if ($o -and $o.session_id) { [string]$o.session_id } else { "" }
+$mutedFile = if ($env:AGENTNOTIFY_MUTED) { $env:AGENTNOTIFY_MUTED } else { Join-Path $env:USERPROFILE ".agentnotify\muted-sessions" }
+if ($sid -and (Test-Path $mutedFile) -and (Get-Content $mutedFile | Where-Object { $_.Trim() -eq $sid })) {
+  if ($DryRun) { Write-Output "SILENT (chat muted): $sid" }; exit 0
+}
+
 # "Work completed" alerts require BOTH gates: agent enabled AND project approved (approved.ps1).
 function Is-Approved($dir) {
   $file = if ($env:AGENTNOTIFY_APPROVED) { $env:AGENTNOTIFY_APPROVED } else { Join-Path $env:USERPROFILE ".agentnotify\approved" }

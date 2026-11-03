@@ -54,6 +54,11 @@ function Emit-Defer {
   exit 0
 }
 
+# Per-chat master switch: a muted session gets no dialog — defer to the terminal prompt.
+$sid = if ($o -and $o.session_id) { [string]$o.session_id } else { "" }
+$mutedFile = if ($env:AGENTNOTIFY_MUTED) { $env:AGENTNOTIFY_MUTED } else { Join-Path $env:USERPROFILE ".agentnotify\muted-sessions" }
+if ($sid -and (Test-Path $mutedFile) -and (Get-Content $mutedFile | Where-Object { $_.Trim() -eq $sid })) { Emit-Defer }
+
 $choice = $env:AGENTNOTIFY_MOCK_CHOICE
 if (-not $env:AGENTNOTIFY_MOCK) {
   try {

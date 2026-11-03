@@ -33,6 +33,15 @@ get() { jq -r "$1 // empty" <<<"$json" 2>/dev/null || true; }
 cwd="$(get '.cwd')"; [[ -z "$cwd" ]] && cwd="$PWD"
 proj="$(basename "$cwd" 2>/dev/null || true)"
 
+# Per-chat master switch (driven by the Spare Cycles panel toggle, or notify-toggle.sh):
+# a muted session gets NO AgentNotify popups at all — notifications or completion.
+sid="$(get '.session_id')"
+MUTED="${AGENTNOTIFY_MUTED:-$HOME/.agentnotify/muted-sessions}"
+if [[ -n "$sid" ]] && grep -qxF "$sid" "$MUTED" 2>/dev/null; then
+  [[ -n "${AGENTNOTIFY_DRYRUN:-}" ]] && echo "SILENT (chat muted): $sid"
+  exit 0
+fi
+
 # "Work completed" notifications require BOTH gates: the agent must be enabled AND the
 # project approved. Both lists default empty, so completion is OFF until you opt in.
 APPROVED="${AGENTNOTIFY_APPROVED:-$HOME/.agentnotify/approved}"

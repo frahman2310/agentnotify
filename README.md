@@ -81,6 +81,22 @@ live at `~/.agentnotify/{approved,agents}` (override via `$AGENTNOTIFY_APPROVED`
 To keep the gate honest, Claude's idle banner is scoped to permission alerts only, so completion comes
 solely from the gated `Stop` — an unapproved chat is fully silent on completion.
 
+### Per-chat on/off from the panel
+
+A toggle in the **Spare Cycles** band above the prompt (`🔔 Notify: On` / `🔕 Notify: Off`) flips
+AgentNotify for the **current chat**. "Off" mutes *everything* for that session — notifications are
+silenced and the approval dialog defers to the terminal — without touching other chats. It's a thin UI
+over [`notify-toggle.sh`](notify-toggle.sh), which records the session id in
+`~/.agentnotify/muted-sessions`; `notify.sh` and `approve.sh` read it and bail early for a muted chat.
+You can also drive it by hand:
+
+```bash
+./notify-toggle.sh <session-id> off     # mute this chat   (on | toggle | status)
+```
+
+The toggle is wired into the spare-cycles mod (`register.tsx`), which shells to `notify-toggle.sh`
+with the live session id.
+
 **Bigger multi-option popup.** If a hook payload carries an `options`/`choices` array, the approver
 shows a scrollable `choose from list` picker instead of Approve/Decline and returns your selection.
 (Claude Code does not currently feed its own in-chat multiple-choice prompts to hooks, so this

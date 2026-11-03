@@ -116,6 +116,12 @@ defer() {
   exit 0
 }
 
+# Per-chat master switch: a muted session gets no dialog — hand the decision back to the
+# agent's own in-terminal prompt (never auto-approve). Driven by the Spare Cycles toggle.
+sid="$(get '.session_id')"
+MUTED="${AGENTNOTIFY_MUTED:-$HOME/.agentnotify/muted-sessions}"
+if [[ -n "$sid" ]] && grep -qxF "$sid" "$MUTED" 2>/dev/null; then defer; fi
+
 if [[ -n "${AGENTNOTIFY_MOCK:-}" ]]; then
   choice="${AGENTNOTIFY_MOCK_CHOICE:-}"          # test mode: never touch the real dialog
 else
