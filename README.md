@@ -132,6 +132,13 @@ Note: informational notifications (Codex "turn complete", Aider "waiting", Claud
 banners; clicking one is an `osascript` no-op that opens Finder — cosmetic and unavoidable for banners.
 The **approval** interaction is the dialog, which never reroutes.
 
+**Focus / Do Not Disturb (macOS).** A Focus mode hides notification banners *and* their sounds, so a
+posted banner can go unseen. Two breakthroughs: (1) the sound is also played **directly** via `afplay`
+(plain audio, not a notification, so Focus can't mute it — `AGENTNOTIFY_SOUND=off` opts out); and (2)
+while a Focus is active, a **completion** pops a dialog naming the chat (`✅ <agent> · <project> — your
+turn`) so you can see *which* chat finished — dialogs break through Focus where banners don't.
+Permission requests already pop their own chat-named Approve dialog.
+
 Uninstall: restore a `*.bak.*` file next to any config, or delete the entry the installer added.
 
 ---

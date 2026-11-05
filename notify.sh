@@ -101,6 +101,16 @@ em=${msg//\\/\\\\};   em=${em//\"/\\\"}
 et=${title//\\/\\\\}; et=${et//\"/\\\"}
 /usr/bin/osascript -e "display notification \"$em\" with title \"$et\" sound name \"$sound\"" >/dev/null 2>&1 || true
 
+# When a Focus mode is hiding banners, a sound tells you SOMETHING needs you but not which
+# chat. Pop a dialog naming the chat — dialogs break through Focus. (Permission requests
+# already pop their own chat-named Approve dialog, so this covers "your turn" completions.)
+focus_active() { local f="$HOME/Library/DoNotDisturb/DB/Assertions.json"; [[ -f "$f" ]] && grep -q 'assertionDetailsModeIdentifier' "$f"; }
+if [[ "$event" == complete ]] && focus_active; then
+  dt="✅ ${agent}${proj:+ · $proj} — your turn"
+  dm=${msg//\\/\\\\}; dm=${dm//\"/\\\"}; dt=${dt//\\/\\\\}; dt=${dt//\"/\\\"}
+  nohup /usr/bin/osascript -e "display dialog \"$dm\" with title \"$dt\" buttons {\"Dismiss\"} default button \"Dismiss\" giving up after 45" >/dev/null 2>&1 &
+fi
+
 # A Focus mode (Sleep, Do Not Disturb, etc.) hides notification banners AND their sounds, so
 # the banner above can go unseen. Play the sound DIRECTLY — afplay is plain audio, not a
 # notification, so it still alerts you through Focus. Set AGENTNOTIFY_SOUND=off to silence.
