@@ -102,3 +102,9 @@ $doc.LoadXml($xml)
 $toast = New-Object Windows.UI.Notifications.ToastNotification $doc
 $appId = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show($toast)
+
+# Focus Assist hides the toast and its sound; play audio directly so you're still alerted.
+# SystemSounds is plain audio, not a notification. Set AGENTNOTIFY_SOUND=off to silence.
+if ($env:AGENTNOTIFY_SOUND -ne 'off') {
+  try { Add-Type -AssemblyName System.Windows.Forms; [System.Media.SystemSounds]::Asterisk.Play() } catch { }
+}

@@ -100,4 +100,12 @@ if [[ -n "${AGENTNOTIFY_DRYRUN:-}" ]]; then echo "FIRE [$event/$sound] $title ::
 em=${msg//\\/\\\\};   em=${em//\"/\\\"}
 et=${title//\\/\\\\}; et=${et//\"/\\\"}
 /usr/bin/osascript -e "display notification \"$em\" with title \"$et\" sound name \"$sound\"" >/dev/null 2>&1 || true
+
+# A Focus mode (Sleep, Do Not Disturb, etc.) hides notification banners AND their sounds, so
+# the banner above can go unseen. Play the sound DIRECTLY — afplay is plain audio, not a
+# notification, so it still alerts you through Focus. Set AGENTNOTIFY_SOUND=off to silence.
+if [[ "${AGENTNOTIFY_SOUND:-on}" != off ]] && command -v afplay >/dev/null 2>&1; then
+  case "$sound" in Glass) sf=/System/Library/Sounds/Glass.aiff ;; *) sf=/System/Library/Sounds/Ping.aiff ;; esac
+  [[ -f "$sf" ]] && afplay "$sf" >/dev/null 2>&1 &
+fi
 exit 0
