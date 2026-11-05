@@ -28,11 +28,11 @@ $msg = "$name wants to run: $summary"
 $caption = "Approve$proj?"   # project in the title → distinguishable when stacked
 
 function Emit-Allow {
+  # claude & codex both use PermissionRequest (default case).
   switch ($Agent) {
     "cursor" { Write-Output '{"permission":"allow"}' }
     "gemini" { }   # allow is Gemini's default: print nothing
-    "codex"  { Write-Output '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}' }
-    default  { Write-Output '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"Approved via AgentNotify"}}' }
+    default  { Write-Output '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}' }
   }
   exit 0
 }
@@ -40,8 +40,7 @@ function Emit-Deny {
   switch ($Agent) {
     "cursor" { Write-Output '{"permission":"deny","agentMessage":"Declined via AgentNotify"}' }
     "gemini" { Write-Output '{"decision":"deny","reason":"Declined via AgentNotify"}' }
-    "codex"  { Write-Output '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Declined via AgentNotify"}}}' }
-    default  { Write-Output '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Declined via AgentNotify"}}' }
+    default  { Write-Output '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}' }
   }
   exit 0
 }
